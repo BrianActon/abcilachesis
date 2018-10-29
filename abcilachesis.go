@@ -2,18 +2,22 @@ package abcilachesis
 
 import (
 	"context"
-//	"encoding/json"
+	"encoding/json"
 	"fmt"
 	"time"
 	
+	abci "github.com/tendermint/tendermint/abci/types"
 	"github.com/tendermint/tendermint/rpc/core"
+	core_types"github.com/tendermint/tendermint/rpc/core/types"
 	"github.com/tendermint/tendermint/rpc/client"
+	crypto "github.com/tendermint/tendermint/crypto"
 	cmn "github.com/tendermint/tendermint/libs/common"
 	"github.com/tendermint/tendermint/libs/pubsub/query"
 	tmpubsub "github.com/tendermint/tendermint/libs/pubsub"
 //	tmquery "github.com/tendermint/tendermint/libs/pubsub/query"
 	rpctypes "github.com/tendermint/tendermint/rpc/lib/types"
 	"github.com/tendermint/tendermint/types"
+//	"github.com/tendermint/tendermint/p2p"
 )
 
 //*********************************************************************************************
@@ -42,7 +46,7 @@ import (
 //23		func ClientSubscribe(????????) error {									------------------------------>>>>> help
 //24		func ClienTx(hash []byte, prove bool) error {
 //25		func ClientTxSearch(query string) error {
-//26		func ClientUnconfirmedTxs(limit int) error {
+//26		func CoreUnconfirmedTxs(limit int) error {
 //*********************************************************************************************
 
 
@@ -62,7 +66,7 @@ import (
 type ABCIUnconfirmedTxsJSON struct {
 	Error  		string `json:"error"`
 	Result 		struct {
-		Txs 	[]string `json:"txs"`
+		Txs 	[]types.Tx `json:"txs"`
 		N_Txs  	int `json:"n_txs"`
 	} `json:"result"`
 	ID      	string `json:"id"`
@@ -70,23 +74,26 @@ type ABCIUnconfirmedTxsJSON struct {
 }	
 
 //26
-func CoreUnconfirmedTxs(limit int) error {
+func CoreUnconfirmedTxs(limit int) ([]byte, error) {
 
-//	client := client.NewHTTP("tcp://0.0.0.0:26657", "/websocket")
+	var abciut ABCIUnconfirmedTxsJSON
+	//  as seen in Tendermint code
+	abciut.Jsonrpc = "2.0"
+	//abcini.ID ??v
+
  	result, err := core.UnconfirmedTxs(limit)
 
 	if err != nil {
-		fmt.Println("Handle client.UnconfirmedTxs(limit) error: ", err, result)
-		return err
-	} 
+		fmt.Println("Handle core.UnconfirmedTxs(limit) error: ", err)
+		abciut.Error = err.Error()
+	} else {
+		abciut.Result.Txs   	=  result.Txs
+		abciut.Result.N_Txs   	=  result.N
+	}
 
-//	var abciut ABCIUnconfirmedTxsJSON
+	MarshalledJson, err := json.Marshal(abciut)
 
-//	if err := json.Unmarshal(result, &abciut); err != nil {
-//		return err
-//	}
-
-	return nil
+	return MarshalledJson, err
 }
 
 
@@ -131,45 +138,60 @@ type ABCITxSearchJSON struct {
 	ID      			string `json:"id"`
 	Result  			struct {
 		Txs 			[]struct {
-			Proof 		struct {
-				Proof 	struct {
-					Aunts []string `json:"aunts"`
-				} `json:"Proof"`
-				Data     string `json:"Data"`
-				RootHash string `json:"RootHash"`
-				Total    string `json:"Total"`
-				Index    string `json:"Index"`
-			} `json:"proof"`
-			Tx       	string `json:"tx"`
-			TxResult 	struct {
-			} `json:"tx_result"`
-			Index  		string `json:"index"`
-			Height 		string `json:"height"`
-			Hash   		string `json:"hash"`
+			Proof 		types.TxProof `json:"proof"`
+			Tx       	types.Tx `json:"tx"`
+			TxResult 	abci.ResponseDeliverTx  `json:"tx_result"`
+			Index  		uint32 `json:"index"`
+			Height 		int64 `json:"height"`
+			Hash   		cmn.HexBytes `json:"hash"`
 		} `json:"txs"`
-		TotalCount 		string `json:"total_count"`
+		TotalCount 		int `json:"total_count"`
 	} `json:"result"`
 }
 
+type StTx struct {
+	Proof 		types.TxProof 			`json:"proof"`
+	Tx       	types.Tx 				`json:"tx"`
+	TxResult 	abci.ResponseDeliverTx  `json:"tx_result"`
+	Index  		uint32 					`json:"index"`
+	Height 		int64 					`json:"height"`
+	Hash   		cmn.HexBytes 			`json:"hash"`
+}
+
 //25
-func ClientTxSearch(query string) error {
+func ClientTxSearch(query string) ([]byte, error) {
+
+	var abcits ABCITxSearchJSON
+	//  as seen in Tendermint code
+	abcits.Jsonrpc = "2.0"
+	//abcini.ID ??
 
 	client := client.NewHTTP("tcp://0.0.0.0:26657", "/websocket")
-//	q, err := tmquery.New("account.owner='Ivan'")
-//	q, err := tmquery.New(query)
 	tx, err := client.TxSearch(query, true, 1, 1)
 
 	if err != nil {
-		fmt.Println("Handle client.TxSearch(q, true) error: ", err, tx)
-		return err
-	} 
+		fmt.Println("Handle client.TxSearch(q, true) error: ", err)
+	}  else {
 
-//	var abcits ABCITxSearchJSON
+		var sttx StTx
 
-//	if err := json.Unmarshal(tx, &abcits); err != nil {
-//		return err
-//	}
-	return nil
+		abcits.Result.TotalCount 			=	tx.TotalCount
+
+		for i := 0; i < abcits.Result.TotalCount; i++ {
+			sttx.Proof 			= tx.Txs[i].Proof
+			sttx.Tx       		= tx.Txs[i].Tx
+			sttx.TxResult 		= tx.Txs[i].TxResult
+			sttx.Index  		= tx.Txs[i].Index
+			sttx.Height 		= tx.Txs[i].Height
+			sttx.Hash 			= tx.Txs[i].Hash
+
+			abcits.Result.Txs 	=	append(abcits.Result.Txs, sttx)
+		}	
+	}
+
+	MarshalledJson, err := json.Marshal(abcits)
+
+	return MarshalledJson, err
 }
 
 
@@ -206,24 +228,12 @@ func ClientTxSearch(query string) error {
 type ABCITxJSON struct {
 	Error  				string `json:"error"`
 	Result 				struct {
-		Proof 			struct {
-			Proof 		struct {
-				Aunts 	[]interface{} `json:"aunts"`
-			} `json:"Proof"`
-			Data     	string `json:"Data"`
-			RootHash 	string `json:"RootHash"`
-			Total    	string `json:"Total"`
-			Index    	string `json:"Index"`
-		} `json:"proof"`
-		Tx       		string `json:"tx"`
-		TxResult 		struct {
-			Log  		string `json:"log"`
-			Data 		string `json:"data"`
-			Code 		string `json:"code"`
-		} `json:"tx_result"`
-		Index  			string `json:"index"`
-		Height 			string `json:"height"`
-		Hash   			string `json:"hash"`
+		Proof 			types.TxProof `json:"proof"`
+		Tx       		types.Tx `json:"tx"`
+		TxResult 		abci.ResponseDeliverTx  `json:"tx_result"`
+		Index  			uint32 `json:"index"`
+		Height 			int64 `json:"height"`
+		Hash   			cmn.HexBytes `json:"hash"`		
 	} `json:"result"`
 	ID      			string `json:"id"`
 	Jsonrpc 			string `json:"jsonrpc"`
@@ -247,24 +257,34 @@ type ABCITxJSON struct {
 // - `hash`: `[]byte` - hash of the transaction
 //*********************************************************************************************
 //24
-func ClienTx(hash []byte, prove bool) error {
+func ClienTx(hash []byte, prove bool) ([]byte, error) {
 	// Tx allows you to query the transaction results. `nil` could mean the
 	// transaction is in the mempool, invalidated, or was not sent in the first
 	// place.
+
+	var abcit ABCITxJSON
+	//  as seen in Tendermint code
+	abcit.Jsonrpc = "2.0"
+	//abcini.ID ??
+
 	client := client.NewHTTP("tcp://0.0.0.0:26657", "/websocket")
 	tx, err := client.Tx([]byte(hash), prove)
 
 	if err != nil {
-		fmt.Println("Handle client.Tx([]byte(hash), prove) error: ", err, tx)
-		return err
-	} 
+		fmt.Println("Handle client.Tx([]byte(hash), prove) error: ", err)
+		abcit.Error = err.Error()
+	} else {
+		abcit.Result.Proof 			= tx.Proof
+		abcit.Result.Tx       		= tx.Tx
+		abcit.Result.TxResult 		= tx.TxResult
+		abcit.Result.Index  		= tx.Index
+		abcit.Result.Height 		= tx.Height
+		abcit.Result.Hash 			= tx.Hash
+	}
 
-//	var abcit ABCITxJSON
+	MarshalledJson, err := json.Marshal(abcit)
 
-//	if err := json.Unmarshal(tx, &abcit); err != nil {
-//		return err
-//	}
-	return nil
+	return MarshalledJson, err
 }
 
 
@@ -328,35 +348,39 @@ type ABCISubscribeJSON struct {
 }	
 
 //23
-func ClientSubscribe() error {
+//
+//   NOTE : "Websocket only" according to https://tendermint.com/rpc/?go#subscribe
+//
+func ClientSubscribe(clientstring string, querystring string) ([]byte, error) {
+
+//  Only returns err if unsuccessful
+	var abcis ABCISubscribeJSON
+	//  as seen in Tendermint code
+	abcis.Jsonrpc = "2.0"
+	//abcis.ID ??
 
 	client := client.NewHTTP("tcp://0.0.0.0:26657", "/websocket")
 	ctx, cancel := context.WithTimeout(context.Background(), 1) // timeout)
 
 	defer cancel()
 
-	// TODO:  follow query.MustParse to confirm value to pass  --> MOre examples in comments above "json layout"
+	// TODO:  follow query.MustParse to confirm value to pass  --> More examples in comments above "json layout"
 
-	query := query.MustParse("tm.event = 'Tx' AND tx.height = 3")
+	query := query.MustParse(querystring)
 	txs := make(chan interface{})
 
-	//  test-client?? txs?? 
 	//  func Subscribe(wsCtx rpctypes.WSRPCContext, query string) but supplied code below has 4 items.
 
-//	result, err := client.Subscribe(ctx,  query)
-	err := client.Subscribe(ctx, "test-client", query, txs)
+	err := client.Subscribe(ctx, clientstring, query, txs)
 
 	if err != nil {
 		fmt.Println("err= ", err)
+		abcis.Error = err.Error()
+	} else {
+   		abcis.Result = "200 OK"
 	}
-	
-//	var abcis ABCISubscribeJSON
 
-//	if err := json.Unmarshal(result, &abcis); err != nil {
-//		return err
-//	}  
-
-	// txs is a channel!!!!
+	// NOTE:: txs is a channel!!!!
 	// Nowhere in func Subscribe is any data being passed to txs to come out this side. Defaq? 
 
 	go func() {
@@ -364,7 +388,10 @@ func ClientSubscribe() error {
 	        fmt.Println("got ", e.(types.EventDataTx))
 		}
 	}()
-	return nil
+
+	MarshalledJson, err := json.Marshal(abcis)
+
+	return MarshalledJson, err
 }
 
 //*********************************************************************************************
@@ -412,12 +439,14 @@ type ABCIStatusJSON struct {
 	Jsonrpc 					string `json:"jsonrpc"`
 	ID      					string `json:"id"`
 	Result  					struct {
+//		NodeInfo 				p2p.NodeInfo
+		
 		NodeInfo 				struct {
 			ID         			string `json:"id"`
 			ListenAddr 			string `json:"listen_addr"`
 			Network    			string `json:"network"`
 			Version   		 	string `json:"version"`
-			Channels   			string `json:"channels"`
+			Channels   			cmn.HexBytes `json:"channels"`
 			Moniker    			string `json:"moniker"`
 			Other      			struct {
 				AminoVersion     string `json:"amino_version"`
@@ -428,42 +457,58 @@ type ABCIStatusJSON struct {
 				RPCAddr          string `json:"rpc_addr"`
 			} `json:"other"`
 		} `json:"node_info"`
+		
 		SyncInfo 				struct {
-			LatestBlockHash   	string    `json:"latest_block_hash"`
-			LatestAppHash     	string    `json:"latest_app_hash"`
-			LatestBlockHeight 	string    `json:"latest_block_height"`
+			LatestBlockHash   	cmn.HexBytes    `json:"latest_block_hash"`
+			LatestAppHash     	cmn.HexBytes    `json:"latest_app_hash"`
+			LatestBlockHeight 	int64    `json:"latest_block_height"`
 			LatestBlockTime   	time.Time `json:"latest_block_time"`
 			CatchingUp        	bool      `json:"catching_up"`
 		} `json:"sync_info"`
 		ValidatorInfo 			struct {
-			Address 			string `json:"address"`
-			PubKey  			struct {
-				Type  			string `json:"type"`
-				Value 			string `json:"value"`
-			} `json:"pub_key"`
-			VotingPower 		string `json:"voting_power"`
+			Address 			cmn.HexBytes `json:"address"`
+			PubKey  			crypto.PubKey `json:"pub_key"`
+			VotingPower 		int64 `json:"voting_power"`
 		} `json:"validator_info"`
 	} `json:"result"`
 }
 
 //22
-func ClientStatus() error {
+func ClientStatus() ([]byte, error) {
+
+	var abcis ABCIStatusJSON
+	//  as seen in Tendermint code
+	abcis.Jsonrpc = "2.0"
+	//abcis.ID ??
 
 	client := client.NewHTTP("tcp://0.0.0.0:26657", "/websocket")
 	result, err := client.Status()
 
 	if err != nil {
 		fmt.Println("Handle client.Status() error: ", err, result)
-		return err
-	} 
+	} else {
 
-//	var abcis ABCIStatusJSON
+		abcis.Result.NodeInfo.ID    	 = string(result.NodeInfo.ID)
+		abcis.Result.NodeInfo.ListenAddr = result.NodeInfo.ListenAddr
+		abcis.Result.NodeInfo.Network    = result.NodeInfo.Network
+		abcis.Result.NodeInfo.Version    = result.NodeInfo.Version
+		abcis.Result.NodeInfo.Moniker    = result.NodeInfo.Moniker
+		abcis.Result.NodeInfo.Channels   = result.NodeInfo.Channels
 
-//	if err := json.Unmarshal(result, &abcis); err != nil {
-//		return err
-//	}
+		abcis.Result.NodeInfo.Other.AminoVersion    = result.NodeInfo.Other.AminoVersion
+		abcis.Result.NodeInfo.Other.P2PVersion   	= result.NodeInfo.Other.P2PVersion
+		abcis.Result.NodeInfo.Other.ConsensusVersion = result.NodeInfo.Other.ConsensusVersion
+		abcis.Result.NodeInfo.Other.RPCVersion 		= result.NodeInfo.Other.RPCVersion
+		abcis.Result.NodeInfo.Other.TxIndex			= result.NodeInfo.Other.TxIndex
+		abcis.Result.NodeInfo.Other.RPCAddr			= result.NodeInfo.Other.RPCAddress
 
-	return nil
+		abcis.Result.SyncInfo  		= result.SyncInfo
+		abcis.Result.ValidatorInfo 	= result.ValidatorInfo
+	}
+
+	MarshalledJson, err := json.Marshal(abcis)
+
+	return MarshalledJson, err
 }
 
 
@@ -494,39 +539,47 @@ func ClientStatus() error {
 type ABCIValidatorsJSON struct {
 	Error  				string `json:"error"`
 	Result 				struct {
-		Validators 		[]struct {
-			Accum       int `json:"accum"`
-			VotingPower int `json:"voting_power"`
-			PubKey      struct {
-				Data 	string `json:"data"`
-				Type 	string `json:"type"`
-			} `json:"pub_key"`
-			Address 	string `json:"address"`
-		} `json:"validators"`
-		BlockHeight 	int `json:"block_height"`
+		Validators 		[]*types.Validator `json:"validators"`
+		BlockHeight 	int64 `json:"block_height"`
 	} `json:"result"`
 	ID      			string `json:"id"`
 	Jsonrpc 			string `json:"jsonrpc"`
 }	
 
 //21
-func ClientValidators(heightPtr *int64) error {
+func ClientValidators(heightPtr *int64) ([]byte, error) {
+
+	var abciv ABCIValidatorsJSON
+	//  as seen in Tendermint code
+	abciv.Jsonrpc = "2.0"
+	//abciv.ID ??
 
 	client := client.NewHTTP("tcp://0.0.0.0:26657", "/websocket")
 	state, err := client.Validators(heightPtr)
 
 	if err != nil {
 		fmt.Println("Handle client.Validators() error: ", err, state)
-		return err
-	} 
+		abciv.Error = err.Error()
+	} else {
 
-//	var abciv ABCIValidatorsJSON
+		var stValidator *types.Validator	
 
-//	if err := json.Unmarshal(state, &abciv); err != nil {
-//		return err
-//	}
+		for i := 0; i < len(state.Validators); i++ {
+			stValidator.Accum 		= state.Validators[i].Accum
+			stValidator.PubKey 		= state.Validators[i].PubKey
+			stValidator.VotingPower = state.Validators[i].VotingPower
+			stValidator.Address 	= state.Validators[i].Address
 
-	return nil
+			abciv.Result.Validators = append(abciv.Result.Validators, stValidator)
+		}	
+
+	}
+
+	abciv.Result.BlockHeight 	= state.BlockHeight
+
+	MarshalledJson, err := json.Marshal(abciv)
+
+	return MarshalledJson, err
 }
 
 
@@ -548,23 +601,26 @@ type ABCIUnsubscribeAllJSON struct {
 }		
 
 //20
-func ClientUnsubscribeAll(wsCtx context.Context,  subscriber string) error {
+func ClientUnsubscribeAll(wsCtx context.Context,  subscriber string) ([]byte, error) {
+
+	var abciusa ABCIUnsubscribeAllJSON
+	//  as seen in Tendermint code
+	abciusa.Jsonrpc = "2.0"
+	//abciusa.ID ??
 
 	client := client.NewHTTP("tcp://0.0.0.0:26657", "/websocket")
 	err := client.UnsubscribeAll(wsCtx, subscriber)
-//result, 
+
 	if err != nil {
 		fmt.Println("Handle client.UnsubscribeAll(...) error: ", err)
-		return err
-	} 
+		abciusa.Error = err.Error()
+	} else {
+   		abciusa.Result = "200 OK"
+	}
 
-//	var abciusa ABCIUnsubscribeAllJSON
+	MarshalledJson, err := json.Marshal(abciusa)
 
-//	if err := json.Unmarshal(result, &abciusa); err != nil {
-//		return err
-//	}
-//
-	return nil
+	return MarshalledJson, err
 }
 
 
@@ -586,27 +642,26 @@ type ABCIUnsubscribeJSON struct {
 }		
 
 //19
-func ClientUnsubscribe(wsCtx context.Context, query tmpubsub.Query) error {
+func ClientUnsubscribe(wsCtx context.Context, query tmpubsub.Query) ([]byte, error) {
+
+	var abcius ABCIUnsubscribeJSON
+	//  as seen in Tendermint code
+	abcius.Jsonrpc = "2.0"
+	//abcius.ID ??
 
 	client := client.NewHTTP("tcp://0.0.0.0:26657", "/websocket")
 	err := client.Unsubscribe(wsCtx, "test-client", query)
 
 	if err != nil {
 		fmt.Println("Handle client.Unsubscribe(...) error: ", err)
-		return err
-	} 
+		abcius.Error = err.Error()
+	} else {
+   		abcius.Result = "200 OK"
+	}
 
+	MarshalledJson, err := json.Marshal(abcius)
 
- //  *****  client.Unsubscribe  only return error. 
-//   *****  Documentation is wrong... AGAIN!!!!!
-	//
-//	var abcius ABCIUnsubscribeJSON
-//
-//	if err := json.Unmarshal(result, &abcius); err != nil {
-//		return err
-//	}
-//
-	return nil
+	return MarshalledJson, err
 }
 
 
@@ -623,6 +678,9 @@ func CoreUnsafeDialPeers(peers []string, persistant bool) error {
 		fmt.Println("Handle client.UnconfirmedTxs() error: ", err, result)
 		return err
 	} 
+
+
+
 	return nil
 }
 
@@ -659,7 +717,7 @@ func CoreUnsafeDialSeeds(seeds []string) error {
 type ABCINumUnconfirmedTxsJSON struct {
 	Error  		string `json:"error"`
 	Result 		struct {
-		Txs 	string `json:"txs"`
+		Txs 	[]types.Tx `json:"txs"`
 		N_Txs  	int `json:"n_txs"`
 	} `json:"result"`
 	ID      	string `json:"id"`
@@ -667,22 +725,26 @@ type ABCINumUnconfirmedTxsJSON struct {
 }	
 
 //16
-func ClientNumUnconfirmedTxs() error {
+func ClientNumUnconfirmedTxs() ([]byte, error) {
 
-//	client := client.NewHTTP("tcp://0.0.0.0:26657", "/websocket")
+	var abcinut ABCINumUnconfirmedTxsJSON
+	//  as seen in Tendermint code
+	abcinut.Jsonrpc = "2.0"
+	//abcini.ID ??v
+
  	result, err := core.UnconfirmedTxs(10)
 
 	if err != nil {
-		fmt.Println("Handle client.UnconfirmedTxs() error: ", err, result)
-		return err
-	} 
+		fmt.Println("Handle client.UnconfirmedTxs() error: ", err)
+		abcinut.Error = err.Error()
+	} else {
+		abcinut.Result.N_Txs    = result.N
+		abcinut.Result.Txs    = result.Txs
+	}
 
-//	var abcinut ABCINumUnconfirmedTxsJSON
-//
-//	if err := json.Unmarshal(result, &abcinut); err != nil {
-//		return err
-//	}
-	return nil
+	MarshalledJson, err := json.Marshal(abcinut)
+
+	return MarshalledJson, err
 }
 
 
@@ -707,7 +769,7 @@ type ABCINetInfoJSON struct {
 	Error  			string `json:"error"`
 	Result 			struct {
 		NPeers    	int           `json:"n_peers"`
-		Peers     	[]interface{} `json:"peers"`
+		Peers     	[]core_types.Peer `json:"peers"`
 		Listeners 	[]string      `json:"listeners"`
 		Listening 	bool          `json:"listening"`
 	} `json:"result"`
@@ -716,22 +778,30 @@ type ABCINetInfoJSON struct {
 }
 
 //15
-func ClientNetInfo() error {
+func ClientNetInfo() ([]byte, error) {
+
+	var abcini ABCINetInfoJSON
+
+	//  as seen in Tendermint code
+	abcini.Jsonrpc = "2.0"
+	//abcini.ID ??v
 
 	client := client.NewHTTP("tcp://0.0.0.0:26657", "/websocket")
  	info, err := client.NetInfo()
 
 	if err != nil {
-		fmt.Println("Handle client.NetInfo() error: ", err, info)
-		return err
-	} 
+		fmt.Println("Handle client.NetInfo() error: ", err)	
+		abcini.Error = err.Error()
+	} else {
+		abcini.Result.NPeers 	=	info.NPeers
+		abcini.Result.Peers     =	info.Peers
+		abcini.Result.Listeners =	info.Listeners
+		abcini.Result.Listening =	info.Listening
+	}
+	
+	MarshalledJson, err := json.Marshal(abcini)
 
-//	var abcini ABCINetInfoJSON
-
-//	if err := json.Unmarshal(info, &abcini); err != nil {
-//		return err
-//	}
-	return nil
+	return MarshalledJson, err
 }
 
 
@@ -755,25 +825,31 @@ type ABCIHealthJSON struct {
 }		
 
 //14
+//
+//  NOTE:
 // Get node health. Returns empty result (200 OK) on success, no response - in
 // case of an error.
-func ClientHealth(wsCtx rpctypes.WSRPCContext) error {
+
+func ClientHealth(wsCtx rpctypes.WSRPCContext) ([]byte, error) {
+
+	var abcih ABCIHealthJSON
+	//  as seen in Tendermint code
+	abcih.Jsonrpc = "2.0"
+	//abcini.ID ??v
 
 	client := client.NewHTTP("tcp://0.0.0.0:26657", "/websocket")
 	result, err := client.Health()
 
 	if err != nil {
-		fmt.Println("Handle client.UnsubscribeAll(...) error: ", err, result)
-		return err
-	} 
+		fmt.Println("Handle client.Health() error: ", err, result)
+		abcih.Error = err.Error()
+	} else {
+   		abcih.Result = "200 OK"
+   	}
 
-//	var abcih ABCIHealthJSON
-//
-//	if err := json.Unmarshal(result, &abcih); err != nil {
-//		return err
-//	}
+	MarshalledJson, err := json.Marshal(abcih)
 
-	return nil
+	return MarshalledJson, err
 }
 
 
@@ -807,14 +883,11 @@ type ABCIGenesisJSON struct {
 	Error  					string `json:"error"`
 	Result 					struct {
 		Genesis 			struct {
-			AppHash    		string `json:"app_hash"`
+			AppHash    		cmn.HexBytes `json:"app_hash"`
 			Validators 		[]struct {
 				Name   		string `json:"name"`
-				Power  		int    `json:"power"`
-				PubKey 		struct {
-					Data 	string `json:"data"`
-					Type 	string `json:"type"`
-				} `json:"pub_key"`
+				Power  		int64    `json:"power"`
+				PubKey 		crypto.PubKey `json:"pub_key"`
 			} `json:"validators"`
 			ChainID     	string    `json:"chain_id"`
 			GenesisTime 	time.Time `json:"genesis_time"`
@@ -824,23 +897,48 @@ type ABCIGenesisJSON struct {
 	Jsonrpc 				string `json:"jsonrpc"`
 }
 
+type GenesisValidator 		struct {
+	Name   		string `json:"name"`
+	Power  		int64    `json:"power"`
+	PubKey 		crypto.PubKey `json:"pub_key"`
+}
+
 //13
-func ClientGenesis() error {
+func ClientGenesis() ([]byte, error) {
+
+	var abcig ABCIGenesisJSON
+	//  as seen in Tendermint code
+	abcig.Jsonrpc = "2.0"
+	//abcig.ID ??v
 
 	client := client.NewHTTP("tcp://0.0.0.0:26657", "/websocket")
 	genesis, err := client.Genesis()
 
 	if err != nil {
-		fmt.Println("Handle client.UnconfirmedTxs() error: ", err, genesis)
-		return err
-	} 
+		fmt.Println("Handle client.UnconfirmedTxs() error: ", err)
+		abcig.Error = err.Error()
+	} else {
 
-//	var abcig ABCIGenesisJSON
-//
-//	if err := json.Unmarshal(genesis, &abcig); err != nil {
-//		return err
-//	}
-	return nil
+		abcig.Result.Genesis.AppHash 		= genesis.Genesis.AppHash
+
+		var stValidator   GenesisValidator	
+
+		for i := 0; i < len(genesis.Genesis.Validators); i++ {
+			stValidator.PubKey 		= genesis.Genesis.Validators[i].PubKey
+			stValidator.Power		= genesis.Genesis.Validators[i].Power
+			stValidator.Name 		= genesis.Genesis.Validators[i].Name
+
+			abcig.Result.Genesis.Validators = append(abcig.Result.Genesis.Validators, stValidator)
+		}	
+
+		abcig.Result.Genesis.ChainID		= genesis.Genesis.ChainID
+		abcig.Result.Genesis.GenesisTime	= genesis.Genesis.GenesisTime
+
+	}
+
+	MarshalledJson, err := json.Marshal(abcig)
+
+	return MarshalledJson, err
 }
 
 
@@ -1069,22 +1167,32 @@ type ABCIDumpConsensusStateJSON struct {
 }
 
 //12
-func ClientDumpConsensusState () error {
+func ClientDumpConsensusState () ([]byte, error) {
+
+	var abcidcs ABCIDumpConsensusStateJSON
+	//  as seen in Tendermint code
+	abcidcs.Jsonrpc = "2.0"
+	//abcidcs.ID ??v
+
 
 	client := client.NewHTTP("tcp://0.0.0.0:26657", "/websocket")
     state, err := client.DumpConsensusState()
 
 	if err != nil {
 		fmt.Println("Handle client.UnconfirmedTxs() error: ", err, state)
-		return err
-	} 
+//		abcidcs.Error = err.Error()
+	} else {
 
-//	var abcidcs ABCIDumpConsensusStateJSON
-//
-//	if err := json.Unmarshal(state, &abcidcs); err != nil {
-//		return err
-//	}
-	return nil
+		//  Place in loop **********
+		//	
+		//for i := 0; i < len(state.Peers); i++ {
+			abcidcs.Result.Peers[0].NodeAddress = state.Peers[0].NodeAddress
+			
+		//}	
+	}
+	MarshalledJson, err := json.Marshal(abcidcs)
+
+	return MarshalledJson, err
 }
 
 
@@ -1122,7 +1230,7 @@ type ABCIConsensusStateJSON struct {
 	Jsonrpc 						string `json:"jsonrpc"`
 	ID      						string `json:"id"`
 	Result  						struct {
-		RoundState 					struct {
+/*		RoundState 					struct {
 			HeightRoundStep   		string `json:"height/round/step"`
 			StartTime         		string `json:"start_time"`
 			ProposalBlockHash 		string `json:"proposal_block_hash"`
@@ -1135,27 +1243,40 @@ type ABCIConsensusStateJSON struct {
 				Precommits         	[]string `json:"precommits"`
 				PrecommitsBitArray 	string   `json:"precommits_bit_array"`
 			} `json:"height_vote_set"`
-		} `json:"round_state"`
+		} `json:"round_state"` */
+		RoundState 					json.RawMessage `json:"round_state"` 
 	} `json:"result"`
 }
 
 //11
-func ClientConsensusState() error {
+func ClientConsensusState() ([]byte, error) {
+
+	var abcics ABCIConsensusStateJSON
+	//  as seen in Tendermint code
+	abcics.Jsonrpc = "2.0"
+	//abcics.ID ??v
 
 	client := client.NewHTTP("tcp://0.0.0.0:26657", "/websocket")
 	state, err := client.ConsensusState()
 
 	if err != nil {
-		fmt.Println("Handle client.BlockResults(heightPtr) error: ", err, state)
-		return err
-	} 
+		fmt.Println("Handle client.ConsensusState() error: ", err, state)
+//		abcics.Error = err.Error()
+	} else {
+		abcics.Result.RoundState = state.RoundState
+	}
 
-//	var abcics ABCIConsensusStateJSON
-//
-//	if err := json.Unmarshal(state, &abcics); err != nil {
+	// state = *core_types.ResultConsensusState)
+// UNSTABLE
+//type ResultConsensusState struct {
+//	RoundState json.RawMessage `json:"round_state"`               ------->> already json format!!!
+//}
+//	if err := json.Unmarshal(state.RoundState, &abcics.Result.RoundState); err != nil {
 //		return err
 //	}
-	return nil
+	MarshalledJson, err := json.Marshal(abcics)
+
+	return MarshalledJson, err
 }
 
 
@@ -1183,36 +1304,46 @@ type ABCIConsensusParamsJSON struct {
 	Jsonrpc 				string `json:"jsonrpc"`
 	ID      				string `json:"id"`
 	Result  				struct {
-		BlockHeight     	string `json:"block_height"`
+		BlockHeight     	int64 `json:"block_height"`
 		ConsensusParams 	struct {
 			BlockSizeParams struct {
-				MaxTxsBytes string `json:"max_txs_bytes"`
-				MaxGas      string `json:"max_gas"`
+				MaxTxsBytes int64 `json:"max_txs_bytes"`
+				MaxGas      int64 `json:"max_gas"`
 			} `json:"block_size_params"`
 			EvidenceParams 	struct {
-				MaxAge 		string `json:"max_age"`
+				MaxAge 		int64 `json:"max_age"`
 			} `json:"evidence_params"`
 		} `json:"consensus_params"`
 	} `json:"result"`
 }
 
 //10
-func ClientConsensusParams(heightPtr *int64) error {
+func ClientConsensusParams(heightPtr *int64) ([]byte, error) {
 
-//	client := client.NewHTTP("tcp://0.0.0.0:26657", "/websocket")
+	var abcicp ABCIConsensusParamsJSON
+	//  as seen in Tendermint code
+	abcicp.Jsonrpc = "2.0"
+	//abcicp.ID ??
+
 	state, err := core.ConsensusParams(heightPtr)
 
 	if err != nil {
-		fmt.Println("Handle client.BlockResults(heightPtr) error: ", err, state)
-		return err
-	} 
+		fmt.Println("Handle core.ConsensusParams(heightPtr) error: ", err)
+	//	abcicp.Error = err.Error()
+	} else {
 
-//	var abcicp ABCIConsensusParamsJSON
-//
-//	if err := json.Unmarshal(state, &abcicp); err != nil {
-//		return err
-//	}
-	return nil
+		abcicp.Result.BlockHeight		=	state.BlockHeight
+
+		abcicp.Result.ConsensusParams.BlockSizeParams.MaxTxsBytes	=	state.ConsensusParams.BlockSize.MaxBytes
+		abcicp.Result.ConsensusParams.BlockSizeParams.MaxGas		=	state.ConsensusParams.BlockSize.MaxGas
+
+		abcicp.Result.ConsensusParams.EvidenceParams.MaxAge		=	state.ConsensusParams.EvidenceParams.MaxAge
+
+	}
+
+	MarshalledJson, err := json.Marshal(abcicp)
+
+	return MarshalledJson, err
 }
 
 
@@ -1280,70 +1411,108 @@ type ABCICommitJSON struct {
 		Canonical 				bool `json:"canonical"`
 		Commit    				struct {
 			Precommits 			[]struct {
-				Signature 		struct {
-					Data 		string `json:"data"`
-					Type 		string `json:"type"`
-				} `json:"signature"`
-				BlockID 		struct {
-					Parts 		struct {
-						Hash  	string `json:"hash"`
-						Total 	int    `json:"total"`
-					} `json:"parts"`
-					Hash string `json:"hash"`
-				} `json:"block_id"`
-				Type             int    `json:"type"`
+				Signature 		[]byte `json:"signature"`
+				BlockID 		types.BlockID `json:"block_id"`
+				Type             byte    `json:"type"`
 				Round            int    `json:"round"`
-				Height           int    `json:"height"`
+				Height           int64   `json:"height"`
 				ValidatorIndex   int    `json:"validator_index"`
-				ValidatorAddress string `json:"validator_address"`
+				ValidatorAddress cmn.HexBytes `json:"validator_address"`
 			} `json:"precommits"`
-			BlockID 			struct {
-				Parts 			struct {
-					Hash  		string `json:"hash"`
-					Total 		int    `json:"total"`
-				} `json:"parts"`
-				Hash 			string `json:"hash"`
-			} `json:"blockID"`
+			BlockID 			types.BlockID `json:"blockID"`
 		} `json:"commit"`
 		Header 					struct {
-			AppHash     		string    `json:"app_hash"`
+			AppHash     		cmn.HexBytes    `json:"app_hash"`
 			ChainID     		string    `json:"chain_id"`
-			Height      		int       `json:"height"`
+			Height      		int64       `json:"height"`
 			Time        		time.Time `json:"time"`
-			NumTxs      		int       `json:"num_txs"`
+			NumTxs      		int64       `json:"num_txs"`
 			LastBlockID 		struct {
 				Parts 			struct {
-					Hash  		string `json:"hash"`
+					Hash  		cmn.HexBytes `json:"hash"`
 					Total 		int    `json:"total"`
 				} `json:"parts"`
 				Hash 			string `json:"hash"`
 			} `json:"last_block_id"`
-			LastCommitHash 		string `json:"last_commit_hash"`
-			DataHash       		string `json:"data_hash"`
-			ValidatorsHash 		string `json:"validators_hash"`
+			LastCommitHash 		cmn.HexBytes `json:"last_commit_hash"`
+			DataHash       		cmn.HexBytes `json:"data_hash"`
+			ValidatorsHash 		cmn.HexBytes `json:"validators_hash"`
 		} `json:"header"`
 	} `json:"result"`
 	ID      					string `json:"id"`
 	Jsonrpc 					string `json:"jsonrpc"`
 }
 
+
+type Vote struct {
+	Signature        []byte    `json:"signature"`
+	BlockID          types.BlockID   `json:"block_id"` // zero if vote is nil.
+	Type             byte      `json:"type"`
+	Round            int       `json:"round"`
+	Height           int64     `json:"height"`
+	ValidatorIndex   int       `json:"validator_index"`
+	ValidatorAddress cmn.HexBytes   `json:"validator_address"`
+//	Timestamp        time.Time `json:"timestamp"`
+}
+
 //9
-func ClientCommit(heightPtr *int64) error {
+func ClientCommit(heightPtr *int64) ([]byte, error) {
+
+	var abcic ABCICommitJSON
+	//  as seen in Tendermint code
+	abcic.Jsonrpc = "2.0"
+	//abcic.ID ??
+
+	var StVote Vote
 
 	client := client.NewHTTP("tcp://0.0.0.0:26657", "/websocket")
-	info, err := client.BlockResults(heightPtr)
+	info, err := client.Commit(heightPtr)
 
 	if err != nil {
-		fmt.Println("Handle client.BlockResults(heightPtr) error: ", err, info)
-		return err
-	} 
+		fmt.Println("Handleclient.Commit(heightPtr) error: ", err, info)
+		abcic.Error = err.Error()
+	} else {
 
-//	var abciresults ABCIBlockResultsJSON
-//
-//	if err := json.Unmarshal(info, &abciresults); err != nil {
-//		return err
-//	}
-	return nil
+//canonical
+
+		abcic.Result.Canonical  	= info.CanonicalCommit
+
+//commit
+
+		for i := 0; i < len(info.SignedHeader.Commit.Precommits); i++ {
+
+ 			StVote.ValidatorAddress = 	info.SignedHeader.Commit.Precommits[i].ValidatorAddress
+ 			StVote.ValidatorIndex 	= 	info.SignedHeader.Commit.Precommits[i].ValidatorIndex
+ 			StVote.Height 			= 	info.SignedHeader.Commit.Precommits[i].Height
+ 			StVote.Round 			= 	info.SignedHeader.Commit.Precommits[i].Round
+ 			StVote.Type 			= 	info.SignedHeader.Commit.Precommits[i].Type
+ 			StVote.BlockID 			= 	info.SignedHeader.Commit.Precommits[i].BlockID
+ 			StVote.Signature 		= 	info.SignedHeader.Commit.Precommits[i].Signature
+
+			abcic.Result.Commit.Precommits  	= append(abcic.Result.Commit.Precommits , StVote)
+		}
+
+		abcic.Result.Commit.BlockID =  abcic.Result.Commit.BlockID 
+
+//header
+
+		abcic.Result.Header.AppHash  		= info.SignedHeader.Header.AppHash
+		abcic.Result.Header.ChainID  		= info.SignedHeader.Header.ChainID
+		abcic.Result.Header.Height  		= info.SignedHeader.Header.Height
+		abcic.Result.Header.Time  			= info.SignedHeader.Header.Time
+		abcic.Result.Header.NumTxs  		= info.SignedHeader.Header.NumTxs
+		abcic.Result.Header.LastCommitHash  = info.SignedHeader.Header.LastCommitHash
+		abcic.Result.Header.DataHash  		= info.SignedHeader.Header.DataHash
+		abcic.Result.Header.ValidatorsHash  = info.SignedHeader.Header.ValidatorsHash
+
+		abcic.Result.Header.LastBlockID.Parts.Hash  	= info.SignedHeader.Header.LastBlockID.PartsHeader.Hash
+		abcic.Result.Header.LastBlockID.Parts.Total  	= info.SignedHeader.Header.LastBlockID.PartsHeader.Total
+
+	}
+
+	MarshalledJson, err := json.Marshal(abcic)
+
+	return MarshalledJson, err
 }
 
 
@@ -1352,46 +1521,79 @@ func ClientCommit(heightPtr *int64) error {
 //  json layout
 //*********************************************************************************************
 // {
-// 	"error": "",
-// 	"result": {
-// 		"hash": "E39AAB7A537ABAA237831742DCE1117F187C3C52",
-// 		"log": "",
-// 		"data": "",
-// 		"code": 0
-// 	},
-// 	"id": "",
-// 	"jsonrpc": "2.0"
-// }
+//    "error": "",
+//    "result": {
+//        "height": "26682",
+//        "hash": "75CA0F856A4DA078FC4911580360E70CEFB2EBEE",
+//        "deliver_tx": {
+//            "log": "",
+//            "data": "",
+//            "code": "0"
+//        },
+//        "check_tx": {
+//            "log": "",
+//            "data": "",
+//            "code": "0"
+//        }
+//    },
+//    "id": "",
+//    "jsonrpc": "2.0"
+//}
 //*********************************************************************************************
+
+
 type ABCIbctcJSON struct {
-	Error  		string `json:"error"`
-	Result 		struct {
-		Hash 	string `json:"hash"`
-		Log  	string `json:"log"`
-		Data 	string `json:"data"`
-		Code 	int    `json:"code"`
+	Error  string `json:"error"`
+	Result struct {
+		Height    int64 `json:"height"`
+		Hash      cmn.HexBytes `json:"hash"`
+		DeliverTx struct {
+			Log  string `json:"log"`
+			Data []byte `json:"data"`
+			Code uint32 `json:"code"`
+		} `json:"deliver_tx"`
+		CheckTx struct {
+			Log  string `json:"log"`
+			Data []byte `json:"data"`
+			Code uint32 `json:"code"`
+		} `json:"check_tx"`
 	} `json:"result"`
-	ID      	string `json:"id"`
-	Jsonrpc 	string `json:"jsonrpc"`
-}	
+	ID      string `json:"id"`
+	Jsonrpc string `json:"jsonrpc"`
+}
 
 //8   
-func ClientBroadcastTxCommit(tx types.Tx) error {
+func ClientBroadcastTxCommit(tx types.Tx) ([]byte, error) {
+
+	var abcibctc ABCIbctcJSON
+	//  as seen in Tendermint code
+	abcibctc.Jsonrpc = "2.0"
+	//abcibctc.ID ??
 
 	client := client.NewHTTP("tcp://0.0.0.0:26657", "/websocket")
 	result, err := client.BroadcastTxCommit(tx)
 
 	if err != nil {
 		fmt.Println("Handle client.BroadcastTxCommit(tx) error: ", err, result)
-		return err
-	} 
+		abcibctc.Error = err.Error()
+	} else {
 
-//	var abcibctc ABCIbctcJSON
-//
-//	if err := json.Unmarshal(result, &abcibctc); err != nil {
-//		return err
-//	}
-	return nil
+		abcibctc.Result.Height  	= result.Height
+		abcibctc.Result.Hash  		= result.Hash
+
+		abcibctc.Result.DeliverTx.Log 	= result.DeliverTx.Log
+		abcibctc.Result.DeliverTx.Data 	= result.DeliverTx.Data
+		abcibctc.Result.DeliverTx.Code 	= result.DeliverTx.Code
+
+		abcibctc.Result.CheckTx.Log 	= result.CheckTx.Log
+		abcibctc.Result.CheckTx.Data 	= result.CheckTx.Data
+		abcibctc.Result.CheckTx.Code 	= result.CheckTx.Code
+
+	}
+
+	MarshalledJson, err := json.Marshal(abcibctc)
+
+	return MarshalledJson, err
 }
 
 
@@ -1416,31 +1618,38 @@ type ABCIbctsJSON struct {
 	Jsonrpc 	string `json:"jsonrpc"`
 	ID      	string `json:"id"`
 	Result  	struct {
-		Code 	int    `json:"code"`
-		Data 	string `json:"data"`
+		Code 	uint32    `json:"code"`
+		Data 	cmn.HexBytes `json:"data"`
 		Log  	string `json:"log"`
-		Hash 	string `json:"hash"`
+		Hash 	cmn.HexBytes `json:"hash"`
 	} `json:"result"`
 	Error 	string `json:"error"`
 }
 
 //7    *** Just  SYNC ...  No A! *** 
-func ClientBroadcastTxSync(tx types.Tx) error {
+func ClientBroadcastTxSync(tx types.Tx) ([]byte, error) {
+
+	var abcibcts ABCIbctsJSON
+	//  as seen in Tendermint code
+	abcibcts.Jsonrpc = "2.0"
+	//abcibcts.ID ??
 
 	client := client.NewHTTP("tcp://0.0.0.0:26657", "/websocket")
 	result, err := client.BroadcastTxSync(tx)
 
 	if err != nil {
 		fmt.Println("Handle client.BroadcastTxSync(tx) error: ", err, result)
-		return err
-	} 
+		abcibcts.Error = err.Error()
+	} else {
+		abcibcts.Result.Code  	= result.Code
+		abcibcts.Result.Data  	= result.Data
+		abcibcts.Result.Log  	= result.Log
+		abcibcts.Result.Hash  	= result.Hash
+	}
 
-//	var abcibcts ABCIbctsJSON
-//
-//	if err := json.Unmarshal(result, &abcibcts); err != nil {
-//		return err
-//	}
-	return nil
+	MarshalledJson, err := json.Marshal(abcibcts)
+
+	return MarshalledJson, err
 }
 
 
@@ -1464,32 +1673,39 @@ func ClientBroadcastTxSync(tx types.Tx) error {
 type ABCIbctaJSON struct {
 	Error  		string `json:"error"`
 	Result 		struct {
-		Hash 	string `json:"hash"`
+		Hash 	cmn.HexBytes `json:"hash"`
 		Log  	string `json:"log"`
-		Data 	string `json:"data"`
-		Code 	int    `json:"code"`
+		Data 	cmn.HexBytes `json:"data"`
+		Code 	uint32    `json:"code"`
 	} `json:"result"`
 	ID      	string `json:"id"`
 	Jsonrpc 	string `json:"jsonrpc"`
 }	
 
 //6  ***  Async...   A ... sync *** 
-func ClientBroadcastTxAsync(tx types.Tx) error {
+func ClientBroadcastTxAsync(tx types.Tx) ([]byte, error) {
+
+	var abcibcta ABCIbctaJSON
+	//  as seen in Tendermint code
+	abcibcta.Jsonrpc = "2.0"
+	//abcibcta.ID ??
 
 	client := client.NewHTTP("tcp://0.0.0.0:26657", "/websocket")
  	result, err := client.BroadcastTxAsync(tx)
 
 	if err != nil {
 		fmt.Println("Handle client.BroadcastTxAsync(tx) error: ", err, result)
-		return err
-	} 
+		abcibcta.Error = err.Error()
+	} else {
+		abcibcta.Result.Code  	= result.Code
+		abcibcta.Result.Data  	= result.Data
+		abcibcta.Result.Log  	= result.Log
+		abcibcta.Result.Hash  	= result.Hash
+	}
 
-//	var abcibcta ABCIbctaJSON
-//
-//	if err := json.Unmarshal(result, &abcibcta); err != nil {
-//		return err	
-//	}
-	return nil
+	MarshalledJson, err := json.Marshal(abcibcta)
+
+	return MarshalledJson, err
 }
 
 
@@ -1571,53 +1787,131 @@ type ABCIbcinfoJSON struct {
 	Result 					struct {
 		BlockMetas 			[]struct {
 			Header 			struct {
-				AppHash     string    `json:"app_hash"`
+				AppHash     cmn.HexBytes    `json:"app_hash"`
 				ChainID     string    `json:"chain_id"`
-				Height      string    `json:"height"`
+				Height      int64    `json:"height"`
 				Time        time.Time `json:"time"`
-				NumTxs      string    `json:"num_txs"`
-				LastBlockID struct {
-					Parts 	struct {
-						Hash  string `json:"hash"`
-						Total string `json:"total"`
-					} `json:"parts"`
-					Hash 		string `json:"hash"`
-				} `json:"last_block_id"`
-				LastCommitHash string `json:"last_commit_hash"`
-				DataHash       string `json:"data_hash"`
-				ValidatorsHash string `json:"validators_hash"`
+				NumTxs      int64    `json:"num_txs"`
+		//		LastBlockID types.BlockID `json:"last_block_id"`
+				LastCommitHash cmn.HexBytes `json:"last_commit_hash"`
+				DataHash       cmn.HexBytes `json:"data_hash"`
+				ValidatorsHash cmn.HexBytes `json:"validators_hash"`
 			} `json:"header"`
-			BlockID 			struct {
-				Parts 			struct {
-					Hash  		string `json:"hash"`
-					Total 		string `json:"total"`
-				} `json:"parts"`
-				Hash 			string `json:"hash"`
-			} `json:"block_id"`
+			BlockID 			types.BlockID `json:"block_id"`
 		} `json:"block_metas"`
-		LastHeight 				string `json:"last_height"`
+		LastHeight 				int64 `json:"last_height"`
 	} `json:"result"`
 	ID      					string `json:"id"`
 	Jsonrpc 					string `json:"jsonrpc"`
 }
 
+type StHeader struct {
+		AppHash     cmn.HexBytes    `json:"app_hash"`
+		ChainID     string    `json:"chain_id"`
+		Height      int64    `json:"height"`
+		Time        time.Time `json:"time"`
+		NumTxs      int64    `json:"num_txs"`
+		LastBlockID types.BlockID `json:"last_block_id"`
+		LastCommitHash cmn.HexBytes `json:"last_commit_hash"`
+		DataHash       cmn.HexBytes `json:"data_hash"`
+		ValidatorsHash cmn.HexBytes `json:"validators_hash"`
+	}
+
+type StBlockMeta struct {
+	StHeader StHeader `json:"header"`
+	BlockID types.BlockID `json:"block_id"`
+}
+
+
 //5
-func ClientBlockChainInfo(minHeight, maxHeight int64) error {
+func ClientBlockChainInfo(minHeight, maxHeight int64) ([]byte, error) {
+
+	var abcibci ABCIbcinfoJSON
+	//  as seen in Tendermint code
+	abcibci.Jsonrpc = "2.0"
+	//abcibci.ID ??
+
+	var stbm StBlockMeta
+	var sth StHeader
 
 	client := client.NewHTTP("tcp://0.0.0.0:26657", "/websocket")
 	info, err := client.BlockchainInfo(minHeight, maxHeight)
 
 	if err != nil {
 		fmt.Println("Handle client.BlockchainInfo(minHeight, maxHeight) error: ", err, info)
-		return err
-	} 
+		abcibci.Error = err.Error()
+	} else {
 
-//	var abciquery ABCIQueryJSON
-//
-//	if err := json.Unmarshal(info, &abciquery); err != nil {
-//		return err
-//	}
-	return nil
+
+//	info = *core_types.ResultBlockchainInfo
+// List of blocks
+
+//type ResultBlockchainInfo struct {
+//	LastHeight int64              `json:"last_height"`
+//	BlockMetas []*types.BlockMeta `json:"block_metas"`
+//}
+
+// BlockMeta contains meta information about a block - namely, it's ID and Header.
+//type BlockMeta struct {
+//	BlockID BlockID `json:"block_id"` // the block hash and partsethash
+//	Header  Header  `json:"header"`   // The block's Header
+//}
+
+// BlockID defines the unique ID of a block as its Hash and its PartSetHeader
+//type BlockID struct {
+//	Hash        cmn.HexBytes  `json:"hash"`
+//	PartsHeader PartSetHeader `json:"parts"`
+//}	
+
+//type Header struct {
+//	ChainID  string    `json:"chain_id"`
+//	Height   int64     `json:"height"`
+//	Time     time.Time `json:"time"`
+//	NumTxs   int64     `json:"num_txs"`
+//	TotalTxs int64     `json:"total_txs"`
+//	LastBlockID BlockID `json:"last_block_id"`
+//	LastCommitHash cmn.HexBytes `json:"last_commit_hash"` 
+//	DataHash       cmn.HexBytes `json:"data_hash"`        
+//	ValidatorsHash     cmn.HexBytes `json:"validators_hash"`      
+//	NextValidatorsHash cmn.HexBytes `json:"next_validators_hash"` 
+//	ConsensusHash      cmn.HexBytes `json:"consensus_hash"`       
+//	AppHash            cmn.HexBytes `json:"app_hash"`             
+//	LastResultsHash    cmn.HexBytes `json:"last_results_hash"`    
+///	EvidenceHash    cmn.HexBytes `json:"evidence_hash"`    
+//	ProposerAddress Address      `json:"proposer_address"` 
+//}	
+
+	// nope.  Need to build up Header and BlockID per occurence, and append THAT BlockMeta to BlockMetas
+
+
+
+		for i := 0; i < len(info.BlockMetas); i++ {
+
+// WAAAY more info according to header struct.
+
+			sth.AppHash  			= info.BlockMetas[i].Header.AppHash
+			sth.ChainID  			= info.BlockMetas[i].Header.ChainID
+			sth.Height  			= info.BlockMetas[i].Header.Height
+			sth.Time  				= info.BlockMetas[i].Header.Time
+			sth.NumTxs  			= info.BlockMetas[i].Header.NumTxs
+			sth.LastCommitHash  	= info.BlockMetas[i].Header.LastCommitHash
+			sth.LastBlockID  		= info.BlockMetas[i].Header.LastBlockID
+			sth.DataHash  			= info.BlockMetas[i].Header.DataHash
+			sth.ValidatorsHash  	= info.BlockMetas[i].Header.ValidatorsHash
+			
+			stbm.StHeader 			= sth
+			stbm.BlockID  			= info.BlockMetas[i].BlockID
+
+			abcibci.Result.BlockMetas		= append(abcibci.Result.BlockMetas, stbm)
+
+		}
+
+		abcibci.Result.LastHeight 	= info.LastHeight
+	}
+	
+	MarshalledJson, err := json.Marshal(abcibci)
+
+	return MarshalledJson, err
 }
 
 
@@ -1639,30 +1933,46 @@ func ClientBlockChainInfo(minHeight, maxHeight int64) error {
 // }
 //*********************************************************************************************
 type ABCIBlockResultsJSON struct {
-	Height  string `json:"height"`
+	Height  int64 `json:"height"`
 	Results []struct {
-		Code string `json:"code"`
-		Data string `json:"data"`
+		Code uint32   `json:"code"`
+		Data []byte   `json:"data"`
 	} `json:"results"`
 }
 
+type StResults struct {
+	Code uint32    	`json:"code"`
+	Data []byte  	`json:"data"`
+} 
+
 //4
-func ClientBlockResult(heightPtr *int64) error {
+func ClientBlockResults(heightPtr *int64)  ([]byte, error) {
+
+	var abciresults ABCIBlockResultsJSON
 
 	client := client.NewHTTP("tcp://0.0.0.0:26657", "/websocket")
 	info, err := client.BlockResults(heightPtr)
 
 	if err != nil {
 		fmt.Println("Handle client.BlockResults(heightPtr) error: ", err, info)
-		return err
-	} 
+	//	abciresults.Error = err.Error()
+	} else {
 
-//	var abciresults ABCIBlockResultsJSON
-//
-//	if err := json.Unmarshal(info, &abciresults); err != nil {
-//		return err
-//	}
-	return nil
+		var sr StResults
+
+		abciresults.Height = info.Height
+			
+		var i int64 = 0
+		for ; i < info.Height; i++ {  
+			sr.Code = info.Results.DeliverTx[i].Code        
+			sr.Data = info.Results.DeliverTx[i].Data   
+			abciresults.Results = append(abciresults.Results, sr)      
+		}
+	}	
+
+	MarshalledJson, err := json.Marshal(abciresults)
+
+	return MarshalledJson, err
 }
 
 
@@ -1758,117 +2068,156 @@ func ClientBlockResult(heightPtr *int64) error {
 type ABCIBlockAtHeightJSON struct {
 	Error  						string `json:"error"`
 	Result 						struct {
+
 		Block 					struct {
+
 			LastCommit 			struct {
+
 				Precommits 		[]struct {
-					Signature 	struct {
-						Data 	string `json:"data"`
-						Type 	string `json:"type"`
-					} `json:"signature"`
-					BlockID 	struct {
-						Parts 	struct {
-							Hash  string `json:"hash"`
-							Total string `json:"total"`
-						} `json:"parts"`
-						Hash 	string `json:"hash"`
-					} `json:"block_id"`
-					Type             string `json:"type"`
-					Round            string `json:"round"`
-					Height           string `json:"height"`
-					ValidatorIndex   string `json:"validator_index"`
-					ValidatorAddress string `json:"validator_address"`
+
+					Signature 	[]byte `json:"signature"`
+
+					BlockID 	types.BlockID `json:"block_id"`
+
+					Type             byte `json:"type"`
+					Round            int `json:"round"`
+					Height           int64 `json:"height"`
+					ValidatorIndex   int `json:"validator_index"`
+					ValidatorAddress cmn.HexBytes `json:"validator_address"`
 				} `json:"precommits"`
-				BlockID 		struct {
-					Parts 		struct {
-						Hash  	string `json:"hash"`
-						Total 	string `json:"total"`
-					} `json:"parts"`
-					Hash 		string `json:"hash"`
-				} `json:"blockID"`
+
+				BlockID 		types.BlockID `json:"blockID"`
+
 			} `json:"last_commit"`
+
 			Data 				struct {
-				Txs 			[]interface{} `json:"txs"`
+				Txs 			[]byte `json:"txs"`
 			} `json:"data"`
+
 			Header 			struct {
-				AppHash     string    `json:"app_hash"`
+
+				AppHash     cmn.HexBytes    `json:"app_hash"`
 				ChainID     string    `json:"chain_id"`
-				Height      string    `json:"height"`
+				Height      int64    `json:"height"`
 				Time        time.Time `json:"time"`
-				NumTxs      string    `json:"num_txs"`
-				LastBlockID struct {
-					Parts 	struct {
-						Hash  string `json:"hash"`
-						Total string `json:"total"`
-					} `json:"parts"`
-					Hash 	string `json:"hash"`
-				} `json:"last_block_id"`
-				LastCommitHash string `json:"last_commit_hash"`
-				DataHash       string `json:"data_hash"`
-				ValidatorsHash string `json:"validators_hash"`
+				NumTxs      int64    `json:"num_txs"`
+				LastBlockID 	types.BlockID `json:"last_block_id"`
+				LastCommitHash 	cmn.HexBytes `json:"last_commit_hash"`
+				DataHash       	cmn.HexBytes `json:"data_hash"`
+				ValidatorsHash 	cmn.HexBytes `json:"validators_hash"`
 			} `json:"header"`
+
 		} `json:"block"`
+
 		BlockMeta 			struct {
+
 			Header 			struct {
-				AppHash     string    `json:"app_hash"`
+
+				AppHash     cmn.HexBytes    `json:"app_hash"`
 				ChainID     string    `json:"chain_id"`
-				Height      string    `json:"height"`
+				Height      int64    `json:"height"`
 				Time        time.Time `json:"time"`
-				NumTxs      string    `json:"num_txs"`
-				LastBlockID struct {
-					Parts 	struct {
-						Hash  string `json:"hash"`
-						Total string `json:"total"`
-					} `json:"parts"`
-					Hash 	string `json:"hash"`
-				} `json:"last_block_id"`
-				LastCommitHash string `json:"last_commit_hash"`
-				DataHash       string `json:"data_hash"`
-				ValidatorsHash string `json:"validators_hash"`
+				NumTxs      int64    `json:"num_txs"`
+				LastBlockID types.BlockID `json:"last_block_id"`
+				LastCommitHash cmn.HexBytes `json:"last_commit_hash"`
+				DataHash       cmn.HexBytes `json:"data_hash"`
+				ValidatorsHash cmn.HexBytes `json:"validators_hash"`
 			} `json:"header"`
-			BlockID 		struct {
-				Parts 		struct {
-					Hash  	string `json:"hash"`
-					Total 	string `json:"total"`
-				} `json:"parts"`
-				Hash 		string `json:"hash"`
-			} `json:"block_id"`
+			BlockID 		types.BlockID `json:"block_id"`
 		} `json:"block_meta"`
 	} `json:"result"`
+
 	ID      				string `json:"id"`
 	Jsonrpc 				string `json:"jsonrpc"`
 }
 
-// Get block at a given height.
-// If no height is provided, it will fetch the latest block.
+
+type StPrecommits 	struct {
+
+	Signature 		[]byte `json:"signature"`
+
+	BlockID 		types.BlockID `json:"block_id"`
+	Type             byte `json:"type"`
+
+	Round            int `json:"round"`
+	Height           int64 `json:"height"`
+	ValidatorIndex   int `json:"validator_index"`
+	ValidatorAddress cmn.HexBytes `json:"validator_address"`
+} 
+
+// Get block at a given height. If no height is provided, it will fetch the latest block.
 //3
-func ClientBlockAtHeight(Height *int64) error {
+func ClientBlockAtHeight(Height *int64) ([]byte, error) {
+
+	var abcibah ABCIBlockAtHeightJSON
+	//  as seen in Tendermint code
+	abcibah.Jsonrpc = "2.0"
+	//abcibah.ID ??
 
 	client := client.NewHTTP("tcp://0.0.0.0:26657", "/websocket")
  	info, err := client.Block(Height)
 
 	if err != nil {
-		fmt.Println("Handle client.Block(Height) error: ", err, info)
-		return err
-	} 
+		fmt.Println("Handle client.Block(Height) error: ", err)
+		abcibah.Error = err.Error()
+	} else {
 
-//	var abcibah ABCIBlockAtHeightJSON
-//
-//	if err := json.Unmarshal(info, &abcibah); err != nil {
-//		return err
-//	}
-	return nil
+		var rblp 	StPrecommits
+		for i := 0; i < len(info.Block.LastCommit.Precommits); i ++ {
+
+			rblp.Signature 				= 	info.Block.LastCommit.Precommits[i].Signature
+			rblp.BlockID 				= 	info.Block.LastCommit.Precommits[i].BlockID
+			rblp.BlockID.Hash 			= 	info.Block.LastCommit.Precommits[i].BlockID.Hash
+			rblp.Type 					= 	info.Block.LastCommit.Precommits[i].Type
+			rblp.Round 					= 	info.Block.LastCommit.Precommits[i].Round
+			rblp.Height 				=	info.Block.LastCommit.Precommits[i].Height
+			rblp.ValidatorIndex 		= 	info.Block.LastCommit.Precommits[i].ValidatorIndex 
+			rblp.ValidatorAddress 		= 	info.Block.LastCommit.Precommits[i].ValidatorAddress
+
+			abcibah.Result.Block.LastCommit.Precommits	= append(abcibah.Result.Block.LastCommit.Precommits, rblp)
+		}
+
+	// -- Block  --  Data
+		//  ??????????????????????????????????????????????????????
+		//
+		//abcibah.Result.Block.Data.Txs	=   info.Block.Data.Txs
+
+	// -- Block  -- Header
+
+		abcibah.Result.Block.Header.AppHash  		= info.Block.Header.AppHash
+		abcibah.Result.Block.Header.ChainID  		= info.Block.Header.ChainID
+		abcibah.Result.Block.Header.Height  		= info.Block.Header.Height
+		abcibah.Result.Block.Header.Time  			= info.Block.Header.Time
+		abcibah.Result.Block.Header.NumTxs  		= info.Block.Header.NumTxs
+		abcibah.Result.Block.Header.LastBlockID  	= info.Block.Header.LastBlockID
+		abcibah.Result.Block.Header.LastCommitHash  = info.Block.Header.LastCommitHash
+		abcibah.Result.Block.Header.DataHash  		= info.Block.Header.DataHash
+		abcibah.Result.Block.Header.ValidatorsHash  = info.Block.Header.ValidatorsHash
+
+	// -- BlockMeta
+	// -- BlockMeta  -- Header
+
+		abcibah.Result.BlockMeta.Header.AppHash 		= info.BlockMeta.Header.AppHash 
+		abcibah.Result.BlockMeta.Header.ChainID 		= info.BlockMeta.Header.ChainID 
+		abcibah.Result.BlockMeta.Header.Height 			= info.BlockMeta.Header.Height 
+		abcibah.Result.BlockMeta.Header.Time 			= info.BlockMeta.Header.Time 
+		abcibah.Result.BlockMeta.Header.LastBlockID 	= info.BlockMeta.Header.LastBlockID 
+		abcibah.Result.BlockMeta.Header.LastBlockID.Hash 		= info.BlockMeta.Header.LastBlockID.Hash 
+		abcibah.Result.BlockMeta.Header.LastCommitHash 	= info.BlockMeta.Header.LastCommitHash 
+		abcibah.Result.BlockMeta.Header.DataHash 		= info.BlockMeta.Header.DataHash 		
+		abcibah.Result.BlockMeta.Header.ValidatorsHash 	= info.BlockMeta.Header.ValidatorsHash
+
+	// -- BlockMeta  -- BlockID
+
+		abcibah.Result.BlockMeta.BlockID 				= info.BlockMeta.BlockID	
+		abcibah.Result.BlockMeta.BlockID.Hash 			= info.BlockMeta.BlockID.Hash 		
+
+	}
+
+	MarshalledJson, err := json.Marshal(abcibah)
+
+	return MarshalledJson, err
 }
-
-
-
-//*********************************************************************************************
-//*********************************************************************************************
-//*********************************************************************************************
-//*********************************************************************************************
-//*********************************************************************************************
-//*********************************************************************************************
-//*********************************************************************************************
-//*********************************************************************************************
 
 
 //*********************************************************************************************
@@ -1892,16 +2241,16 @@ func ClientBlockAtHeight(Height *int64) error {
 // }
 //*********************************************************************************************
 type ABCIQueryJSON struct {
-	Error 	error  `json:"error"`
+	Error 	string  `json:"error"`
 	Result  struct  {
 		Response 	struct {
 			Log 	string `json:"log"`
-			Height 	string `json:"height"`
-			Proof 	string `json:"proof"`
-			Value 	string `json:"value"`
-			Key 	string `json:"key"`
-			Index 	int `json:"index"`
-			Code 	int `json:"code"`
+			Height 	int64 `json:"height"`
+			Proof 	[]byte `json:"proof"`
+			Value 	[]byte `json:"value"`
+			Key 	[]byte `json:"key"`
+			Index 	int64 `json:"index"`
+			Code 	uint32 `json:"code"`
 		} `json:"response"` 
 	} `json:"result"`
 	ID 		string `json:"id"`
@@ -1917,27 +2266,43 @@ type ABCIQueryJSON struct {
 // | trusted   | bool   | false   | false    | Does not include a proof of the data inclusion |
 //*********************************************************************************************
 //2
-func ClientABCIQuery(path string, data cmn.HexBytes, height int64, trusted bool) error {
+func ClientABCIQuery(path string, data cmn.HexBytes, height int64, trusted bool) ([]byte, error) {
+
+	var abciquery ABCIQueryJSON
+	//  as seen in Tendermint code
+	abciquery.JsonRPC = "2.0"
+	//abciquery.ID ??
 
 	client := client.NewHTTP("tcp://0.0.0.0:26657", "/websocket")
-//	result, err := client.ABCIQuery(path, data, height, trusted)
+
+// ***also different: https://github.com/tendermint/tendermint/blob/master/rpc/core/abci.go#L89
+//	func ABCIQuery(path string, data cmn.HexBytes, height int64, trusted bool)
+// see line 52	result, err := client.ABCIQuery(path, data, height, trusted)
+// see Line 20   result, err := client.ABCIQuery("", "abcd", true)
+
+//func (c *HTTP) ABCIQuery(path string, data cmn.HexBytes) (*ctypes.ResultABCIQuery, error) {
+//	return c.ABCIQueryWithOptions(path, data, DefaultABCIQueryOptions)
+//} 
+
 	result, err := client.ABCIQuery(path, data)
 
 	if err != nil {
 		fmt.Println("Handle client.ABCIQuery(path, data, height, trusted) error: ", err, result)
-		return err
-	} 
+		abciquery.Error = err.Error()
+	} else {
+		abciquery.Result.Response.Log 			= result.Response.Log
+		abciquery.Result.Response.Height 		= result.Response.Height
+		abciquery.Result.Response.Proof 		= result.Response.Proof
+		abciquery.Result.Response.Value 		= result.Response.Value
+		abciquery.Result.Response.Key 			= result.Response.Key
+		abciquery.Result.Response.Index 		= result.Response.Index
+		abciquery.Result.Response.Code 			= result.Response.Code
+	}
 
-//	var abciquery ABCIQueryJSON
-//
-//	if err := json.Unmarshal(result, &abciquery); err != nil {
-//		return err
-//	}
-	return nil
+	MarshalledJson, err := json.Marshal(abciquery)
+
+	return MarshalledJson, err
 }
-
-
-
 
 
 //*********************************************************************************************
@@ -1966,20 +2331,25 @@ type ABCIInfoJSON struct {
 }
 
 //1
-func ClientABCIInfo() error {
+func ClientABCIInfo() ([]byte, error) {
+
+
+	var abciinfo ABCIInfoJSON
+	//  as seen in Tendermint code
+	abciinfo.Jsonrpc = "2.0"
+	//abciinfo.ID ??
+
 	client := client.NewHTTP("tcp://0.0.0.0:26657", "/websocket")
 	info, err := client.ABCIInfo()
 
 	if err != nil {
 		fmt.Println("Handle client.ABCIInfo() error: ", err, info)
-		return err
-	} 
+		abciinfo.Error = err.Error()
+	} else {
+		abciinfo.Result.Response.Data  = info.Response.Data
+	}
 
-///	var abciinfo ABCIInfoJSON
+	MarshalledJson, err := json.Marshal(abciinfo)
 
-///	if err := json.Unmarshal(info, &abciinfo); err != nil {
-///		return err
-///	}
-	//  return info, nil
-	return nil
+	return MarshalledJson, err
 }
