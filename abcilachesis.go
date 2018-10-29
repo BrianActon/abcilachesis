@@ -1911,7 +1911,7 @@ func ClientBlockChainInfo(minHeight, maxHeight int64) ([]byte, error) {
 	
 	MarshalledJson, err := json.Marshal(abcibci)
 
-	return MarshalledJson, err
+	return  MarshalledJson, err
 }
 
 
